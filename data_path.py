@@ -65,4 +65,14 @@ DATA_PATH = {
         'train': 'PATH_TO_IMAGES_DIR',
         'valid': 'PATH_TO_IMAGES_DIR'
     },
+    'sprite-dx-data': {
+        'train': {
+            'fgr': '../sprite-dx-data/data/expanded/sample-000',
+            'pha': '../sprite-dx-data/data/automatte/sample-000'
+        },
+        'valid': {
+            'fgr': '../sprite-dx-data/data/expanded/sample-100',
+            'pha': '../sprite-dx-data/data/automatte/sample-100'
+        }
+    },
 }

@@ -17,6 +17,32 @@ Example:
         --output-type com fgr pha err ref \
         --video-target-bgr "PATH_TO_VIDEO_TARGET_BGR"
 
+    uv run python inference_video.py \
+        --model-type mattingrefine \
+        --model-backbone resnet50 \
+        --model-backbone-scale 0.25 \
+        --model-refine-mode sampling \
+        --model-refine-sample-pixels 80000 \
+        --model-checkpoint "pytorch_resnet50.pth" \
+        --video-src "input.mp4" \
+        --video-bgr "input_bgr.png" \
+        --output-dir "outputs" \
+        --output-type com fgr pha err ref \
+        --device cpu
+
+    uv run python inference_video.py \
+        --model-type mattingbase \
+        --model-backbone resnet50 \
+        --model-backbone-scale 0.25 \
+        --model-refine-mode sampling \
+        --model-refine-sample-pixels 80000 \
+        --model-checkpoint "pytorch_resnet50.pth" \
+        --video-src "input.mp4" \
+        --video-bgr "input_bgr.png" \
+        --output-dir "outputs" \
+        --output-type com fgr pha err \
+        --device cpu
+
 """
 
 import argparse
@@ -185,7 +211,8 @@ with torch.no_grad():
             tgt_bgr = tgt_bgr.to(device, non_blocking=True)
         else:
             src, bgr = input_batch
-            tgt_bgr = torch.tensor([120/255, 255/255, 155/255], device=device).view(1, 3, 1, 1)
+            # tgt_bgr = torch.tensor([120/255, 255/255, 155/255], device=device).view(1, 3, 1, 1)
+            tgt_bgr = torch.tensor([50/255, 50/255, 50/255], device=device).view(1, 3, 1, 1)
         src = src.to(device, non_blocking=True)
         bgr = bgr.to(device, non_blocking=True)
         
