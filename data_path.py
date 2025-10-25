@@ -67,12 +67,62 @@ DATA_PATH = {
     },
     'sprite-dx-data': {
         'train': {
-            'fgr': '../sprite-dx-data/data/fgr/sample-000',
-            'pha': '../sprite-dx-data/data/automatte/sample-000'
+            'fgr': '../sprite-dx-data/data/fgr/random',
+            'pha': '../sprite-dx-data/data/automatte/random'
         },
         'valid': {
             'fgr': '../sprite-dx-data/data/fgr/sample-100',
             'pha': '../sprite-dx-data/data/automatte/sample-100'
+        }
+    },
+    'sprite-dx-all': {
+        'train': {
+            'fgr': '../sprite-dx-data/data/fgr',
+            'pha': '../sprite-dx-data/data/automatte'
+        },
+        'valid': {
+            'fgr': '../sprite-dx-data/data/fgr/sample-100',
+            'pha': '../sprite-dx-data/data/automatte/sample-100'
+        }
+    },
+    'sprite-dx-100': {
+        'train': {
+            'fgr': '../sprite-dx-data/data/fgr/sample-100',
+            'pha': '../sprite-dx-data/data/automatte/sample-100'
+        },
+        'valid': {
+            'fgr': '../sprite-dx-data/data/fgr/sample-100',
+            'pha': '../sprite-dx-data/data/automatte/sample-100'
+        }
+    },
+    'sprite-dx-193': {
+        'train': {
+            'fgr': '../sprite-dx-data/data/fgr/sample-193',
+            'pha': '../sprite-dx-data/data/automatte/sample-193'
+        },
+        'valid': {
+            'fgr': '../sprite-dx-data/data/fgr/sample-193',
+            'pha': '../sprite-dx-data/data/automatte/sample-193'
+        }
+    },
+    'sprite-dx-045': {
+        'train': {
+            'fgr': '../sprite-dx-data/data/fgr/sample-045',
+            'pha': '../sprite-dx-data/data/automatte/sample-045'
+        },
+        'valid': {
+            'fgr': '../sprite-dx-data/data/fgr/sample-045',
+            'pha': '../sprite-dx-data/data/automatte/sample-045'
+        }
+    },
+    'sprite-dx-000': {
+        'train': {
+            'fgr': '../sprite-dx-data/data/fgr/sample-000',
+            'pha': '../sprite-dx-data/data/automatte/sample-000'
+        },
+        'valid': {
+            'fgr': '../sprite-dx-data/data/fgr/sample-000',
+            'pha': '../sprite-dx-data/data/automatte/sample-000'
         }
     },
 }

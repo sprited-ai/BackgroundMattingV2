@@ -43,6 +43,19 @@ Example:
         --output-type com fgr pha err \
         --device cpu
 
+    uv run python inference_video.py \
+        --model-type mattingrefine \
+        --model-backbone resnet101 \
+        --model-backbone-scale 0.25 \
+        --model-refine-mode sampling \
+        --model-refine-sample-pixels 80000 \
+        --model-checkpoint ./checkpoints/mattingrefine-resnet101-sprite-dx-data/epoch-3.pth \
+        --video-src "input.mp4" \
+        --video-bgr "input_bgr.png" \
+        --output-dir "outputs" \
+        --output-type com fgr pha err ref \
+        --device cuda
+
 """
 
 import argparse

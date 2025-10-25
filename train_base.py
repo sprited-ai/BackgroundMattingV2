@@ -25,7 +25,7 @@ from torch.nn import functional as F
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
-from torch.optim import Adam
+from torch.optim import AdamW
 from torchvision.utils import make_grid
 from tqdm import tqdm
 from torchvision import transforms as T
@@ -63,6 +63,11 @@ parser.add_argument('--log-train-images-interval', type=int, default=2000)
 parser.add_argument('--log-valid-interval', type=int, default=5000)
 
 parser.add_argument('--checkpoint-interval', type=int, default=5000)
+
+parser.add_argument('--learning-rate-backbone', type=float, default=1e-5)
+parser.add_argument('--learning-rate-aspp', type=float, default=5e-5)
+parser.add_argument('--learning-rate-decoder', type=float, default=5e-5)
+parser.add_argument('--weight-decay', type=float, default=1e-4)
 
 args = parser.parse_args()
 
@@ -126,7 +131,6 @@ def train():
     if args.model_last_checkpoint is not None:
         load_matched_state_dict(model, torch.load(args.model_last_checkpoint))
     elif args.model_pretrain_initialization is not None:
-        # model.load_pretrained_deeplabv3_state_dict(torch.load(args.model_pretrain_initialization)['model_state'])
         checkpoint = torch.load(args.model_pretrain_initialization)
         # Handle different checkpoint formats
         if isinstance(checkpoint, dict) and 'model_state' in checkpoint:
@@ -145,11 +149,11 @@ def train():
         except Exception:
             pass
 
-    optimizer = Adam([
-        {'params': model.backbone.parameters(), 'lr': 1e-4},
-        {'params': model.aspp.parameters(), 'lr': 5e-4},
-        {'params': model.decoder.parameters(), 'lr': 5e-4}
-    ])
+    optimizer = AdamW([
+        {'params': model.backbone.parameters(), 'lr': args.learning_rate_backbone},
+        {'params': model.aspp.parameters(), 'lr': args.learning_rate_aspp},
+        {'params': model.decoder.parameters(), 'lr': args.learning_rate_decoder}
+    ], weight_decay=args.weight_decay)
     scaler = GradScaler()
 
     # Logging and checkpoints
@@ -174,7 +178,6 @@ def train():
             if aug_shadow_idx.any():
                 aug_shadow = true_pha[aug_shadow_idx].mul(0.3 * random.random())
                 aug_shadow = T.RandomAffine(degrees=(-5, 5), translate=(0.2, 0.2), scale=(0.5, 1.5), shear=(-5, 5))(aug_shadow)
-                # aug_shadow = kornia.filters.box_blur(aug_shadow, (random.choice(range(20, 40)),) * 2)
                 kernel_size = random.choice(range(20, 40))
                 aug_shadow = K_filters.box_blur(aug_shadow, (kernel_size, kernel_size))
                 true_src[aug_shadow_idx] = true_src[aug_shadow_idx].sub_(aug_shadow).clamp_(0, 1)
@@ -241,11 +244,21 @@ def train():
 def compute_loss(pred_pha, pred_fgr, pred_err, true_pha, true_fgr):
     true_err = torch.abs(pred_pha.detach() - true_pha)
     true_msk = true_pha != 0
-    #    F.l1_loss(kornia.sobel(pred_pha), kornia.sobel(true_pha)) + \
     return F.l1_loss(pred_pha, true_pha) + \
            F.l1_loss(K_filters.sobel(pred_pha), K_filters.sobel(true_pha)) + \
            F.l1_loss(pred_fgr * true_msk, true_fgr * true_msk) + \
            F.mse_loss(pred_err, true_err)
+
+
+def set_bn_eval(module):
+    """Set all BatchNorm layers inside `module` to eval() to avoid batch-stat errors when batch size is 1.
+
+    This keeps running stats and uses them during forward, while still allowing gradients to flow for weights.
+    """
+    from torch import nn
+    for m in module.modules():
+        if isinstance(m, nn.modules.batchnorm._BatchNorm):
+            m.eval()
 
 
 def random_crop(*imgs):
@@ -253,8 +266,6 @@ def random_crop(*imgs):
     h = random.choice(range(256, 512))
     results = []
     for img in imgs:
-        # img = kornia.resize(img, (max(h, w), max(h, w)))
-        # img = kornia.center_crop(img, (h, w))
         img = K_transform.resize(img, (max(h, w), max(h, w)))
         img = K_transform.center_crop(img, (h, w))
         results.append(img)
@@ -281,6 +292,11 @@ def valid(model, dataloader, writer, step):
 
     writer.add_scalar('valid_loss', loss_total / loss_count, step)
     model.train()
+    # Re-apply BatchNorm eval mode after switching model back to train()
+    try:
+        set_bn_eval(model)
+    except Exception:
+        pass
 
 
 # --------------- Start ---------------

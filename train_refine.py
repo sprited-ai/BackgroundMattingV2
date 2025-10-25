@@ -25,14 +25,17 @@ from torch import nn
 from torch import distributed as dist
 from torch import multiprocessing as mp
 from torch.nn import functional as F
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, Subset
-from torch.optim import Adam
+from torch.optim import AdamW
 from torchvision.utils import make_grid
 from tqdm import tqdm
 from torchvision import transforms as T
 from PIL import Image
+import kornia.geometry.transform as K_transform
+import kornia.filters as K_filters
+import kornia.enhance as K_enhance
 
 from data_path import DATA_PATH
 from dataset import ImagesDataset, ZipDataset, VideoDataset, SampleDataset
@@ -67,6 +70,12 @@ parser.add_argument('--log-train-images-interval', type=int, default=1000)
 parser.add_argument('--log-valid-interval', type=int, default=2000)
 
 parser.add_argument('--checkpoint-interval', type=int, default=2000)
+
+parser.add_argument('--learning-rate-backbone', type=float, default=5e-4)
+parser.add_argument('--learning-rate-aspp', type=float, default=5e-4)
+parser.add_argument('--learning-rate-decoder', type=float, default=1e-4)
+parser.add_argument('--learning-rate-refiner', type=float, default=3e-4)
+parser.add_argument('--weight-decay', type=float, default=1e-4)
 
 args = parser.parse_args()
 
@@ -150,13 +159,13 @@ def train_worker(rank, addr, port):
     if args.model_last_checkpoint is not None:
         load_matched_state_dict(model, torch.load(args.model_last_checkpoint))
 
-    optimizer = Adam([
-        {'params': model.backbone.parameters(), 'lr': 5e-5},
-        {'params': model.aspp.parameters(), 'lr': 5e-5},
-        {'params': model.decoder.parameters(), 'lr': 1e-4},
-        {'params': model.refiner.parameters(), 'lr': 3e-4},
-    ])
-    scaler = GradScaler()
+    optimizer = AdamW([
+        {'params': model.backbone.parameters(), 'lr': args.learning_rate_backbone},
+        {'params': model.aspp.parameters(), 'lr': args.learning_rate_aspp},
+        {'params': model.decoder.parameters(), 'lr': args.learning_rate_decoder},
+        {'params': model.refiner.parameters(), 'lr': args.learning_rate_refiner},
+    ], weight_decay=args.weight_decay)
+    scaler = GradScaler('cuda')
     
     # Logging and checkpoints
     if rank == 0:
@@ -181,7 +190,7 @@ def train_worker(rank, addr, port):
             if aug_shadow_idx.any():
                 aug_shadow = true_pha[aug_shadow_idx].mul(0.3 * random.random())
                 aug_shadow = T.RandomAffine(degrees=(-5, 5), translate=(0.2, 0.2), scale=(0.5, 1.5), shear=(-5, 5))(aug_shadow)
-                aug_shadow = kornia.filters.box_blur(aug_shadow, (random.choice(range(20, 40)),) * 2)
+                aug_shadow = K_filters.box_blur(aug_shadow, (random.choice(range(20, 40)),) * 2)
                 true_src[aug_shadow_idx] = true_src[aug_shadow_idx].sub_(aug_shadow).clamp_(0, 1)
                 del aug_shadow
             del aug_shadow_idx
@@ -208,7 +217,7 @@ def train_worker(rank, addr, port):
                 true_bgr[aug_affine_idx] = T.RandomAffine(degrees=(-1, 1), translate=(0.01, 0.01))(true_bgr[aug_affine_idx])
             del aug_affine_idx
             
-            with autocast():
+            with autocast('cuda'):
                 pred_pha, pred_fgr, pred_pha_sm, pred_fgr_sm, pred_err_sm, _ = model_distributed(true_src, true_bgr)
                 loss = compute_loss(pred_pha, pred_fgr, pred_pha_sm, pred_fgr_sm, pred_err_sm, true_pha, true_fgr)
 
@@ -248,18 +257,18 @@ def train_worker(rank, addr, port):
 
 
 def compute_loss(pred_pha_lg, pred_fgr_lg, pred_pha_sm, pred_fgr_sm, pred_err_sm, true_pha_lg, true_fgr_lg):
-    true_pha_sm = kornia.resize(true_pha_lg, pred_pha_sm.shape[2:])
-    true_fgr_sm = kornia.resize(true_fgr_lg, pred_fgr_sm.shape[2:])
+    true_pha_sm = K_transform.resize(true_pha_lg, pred_pha_sm.shape[2:])
+    true_fgr_sm = K_transform.resize(true_fgr_lg, pred_fgr_sm.shape[2:])
     true_msk_lg = true_pha_lg != 0
     true_msk_sm = true_pha_sm != 0
     return F.l1_loss(pred_pha_lg, true_pha_lg) + \
            F.l1_loss(pred_pha_sm, true_pha_sm) + \
-           F.l1_loss(kornia.sobel(pred_pha_lg), kornia.sobel(true_pha_lg)) + \
-           F.l1_loss(kornia.sobel(pred_pha_sm), kornia.sobel(true_pha_sm)) + \
+           F.l1_loss(K_filters.sobel(pred_pha_lg), K_filters.sobel(true_pha_lg)) + \
+           F.l1_loss(K_filters.sobel(pred_pha_sm), K_filters.sobel(true_pha_sm)) + \
            F.l1_loss(pred_fgr_lg * true_msk_lg, true_fgr_lg * true_msk_lg) + \
            F.l1_loss(pred_fgr_sm * true_msk_sm, true_fgr_sm * true_msk_sm) + \
-           F.mse_loss(kornia.resize(pred_err_sm, true_pha_lg.shape[2:]), \
-                      kornia.resize(pred_pha_sm, true_pha_lg.shape[2:]).sub(true_pha_lg).abs())
+           F.mse_loss(K_transform.resize(pred_err_sm, true_pha_lg.shape[2:]), \
+                      K_transform.resize(pred_pha_sm, true_pha_lg.shape[2:]).sub(true_pha_lg).abs())
 
 
 def random_crop(*imgs):
@@ -269,8 +278,8 @@ def random_crop(*imgs):
     scale = max(W_tgt / W_src, H_tgt / H_src)
     results = []
     for img in imgs:
-        img = kornia.resize(img, (int(H_src * scale), int(W_src * scale)))
-        img = kornia.center_crop(img, (H_tgt, W_tgt))
+        img = K_transform.resize(img, (int(H_src * scale), int(W_src * scale)))
+        img = K_transform.center_crop(img, (H_tgt, W_tgt))
         results.append(img)
     return results
 
