@@ -30,6 +30,9 @@ from torchvision.utils import make_grid
 from tqdm import tqdm
 from torchvision import transforms as T
 from PIL import Image
+import kornia.geometry.transform as K_transform
+import kornia.filters as K_filters
+import kornia.enhance as K_enhance
 
 from data_path import DATA_PATH
 from dataset import ImagesDataset, ZipDataset, VideoDataset, SampleDataset
@@ -123,7 +126,24 @@ def train():
     if args.model_last_checkpoint is not None:
         load_matched_state_dict(model, torch.load(args.model_last_checkpoint))
     elif args.model_pretrain_initialization is not None:
-        model.load_pretrained_deeplabv3_state_dict(torch.load(args.model_pretrain_initialization)['model_state'])
+        # model.load_pretrained_deeplabv3_state_dict(torch.load(args.model_pretrain_initialization)['model_state'])
+        checkpoint = torch.load(args.model_pretrain_initialization)
+        # Handle different checkpoint formats
+        if isinstance(checkpoint, dict) and 'model_state' in checkpoint:
+            state_dict = checkpoint['model_state']
+        else:
+            # Assume checkpoint is already the state dict
+            state_dict = checkpoint
+        model.load_pretrained_deeplabv3_state_dict(state_dict)
+        # Keep BatchNorm layers in evaluation mode to avoid "Expected more than 1 value per channel"
+        # errors when batch size becomes 1 in a minibatch.
+        try:
+            from torch import nn
+            for m in model.modules():
+                if isinstance(m, nn.modules.batchnorm._BatchNorm):
+                    m.eval()
+        except Exception:
+            pass
 
     optimizer = Adam([
         {'params': model.backbone.parameters(), 'lr': 1e-4},
@@ -154,7 +174,9 @@ def train():
             if aug_shadow_idx.any():
                 aug_shadow = true_pha[aug_shadow_idx].mul(0.3 * random.random())
                 aug_shadow = T.RandomAffine(degrees=(-5, 5), translate=(0.2, 0.2), scale=(0.5, 1.5), shear=(-5, 5))(aug_shadow)
-                aug_shadow = kornia.filters.box_blur(aug_shadow, (random.choice(range(20, 40)),) * 2)
+                # aug_shadow = kornia.filters.box_blur(aug_shadow, (random.choice(range(20, 40)),) * 2)
+                kernel_size = random.choice(range(20, 40))
+                aug_shadow = K_filters.box_blur(aug_shadow, (kernel_size, kernel_size))
                 true_src[aug_shadow_idx] = true_src[aug_shadow_idx].sub_(aug_shadow).clamp_(0, 1)
                 del aug_shadow
             del aug_shadow_idx
@@ -219,8 +241,9 @@ def train():
 def compute_loss(pred_pha, pred_fgr, pred_err, true_pha, true_fgr):
     true_err = torch.abs(pred_pha.detach() - true_pha)
     true_msk = true_pha != 0
+    #    F.l1_loss(kornia.sobel(pred_pha), kornia.sobel(true_pha)) + \
     return F.l1_loss(pred_pha, true_pha) + \
-           F.l1_loss(kornia.sobel(pred_pha), kornia.sobel(true_pha)) + \
+           F.l1_loss(K_filters.sobel(pred_pha), K_filters.sobel(true_pha)) + \
            F.l1_loss(pred_fgr * true_msk, true_fgr * true_msk) + \
            F.mse_loss(pred_err, true_err)
 
@@ -230,8 +253,10 @@ def random_crop(*imgs):
     h = random.choice(range(256, 512))
     results = []
     for img in imgs:
-        img = kornia.resize(img, (max(h, w), max(h, w)))
-        img = kornia.center_crop(img, (h, w))
+        # img = kornia.resize(img, (max(h, w), max(h, w)))
+        # img = kornia.center_crop(img, (h, w))
+        img = K_transform.resize(img, (max(h, w), max(h, w)))
+        img = K_transform.center_crop(img, (h, w))
         results.append(img)
     return results
 
